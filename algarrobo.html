@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Don Algarrobo — El abuelo del monte</title>
+<meta name="description" content="Conversá en voz alta con Don Algarrobo, un algarrobo digital del monte formoseño.">
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+body{background:linear-gradient(#5fb0e8 0%,#a9d9f2 55%,#fdeec2 100%)}
+#c{position:fixed;inset:0;width:100%;height:100%;display:block}
+header{position:fixed;top:0;left:0;right:0;padding:calc(env(safe-area-inset-top,0px) + 10px) 14px 8px;text-align:center;pointer-events:none}
+h1{margin:0;font:700 clamp(1.1rem,3.6vw,1.9rem)/1.15 Georgia,"Times New Roman",serif;color:#3b2412;text-shadow:0 1px 0 #fff8,0 2px 8px #fff9}
+header p{margin:2px 0 0;font-size:clamp(.75rem,2.4vw,.95rem);color:#4a3a1f;font-style:italic;text-shadow:0 1px 6px #fffa}
+#panel{position:fixed;left:0;right:0;bottom:0;padding:12px 14px calc(env(safe-area-inset-bottom,0px) + 10px);display:flex;flex-direction:column;align-items:center;gap:8px;background:linear-gradient(transparent,#2a3a1acc 45%)}
+#cap{min-height:2.6em;max-width:640px;text-align:center;color:#fff;font-size:clamp(.9rem,2.8vw,1.05rem);line-height:1.35;text-shadow:0 1px 4px #000a}
+#status{color:#ffe9a8;font-weight:600;font-size:.95rem;text-shadow:0 1px 4px #000a}
+.btns{position:relative;display:flex;gap:10px;align-items:center;justify-content:center}
+button{font:700 clamp(1rem,3.4vw,1.2rem) system-ui,sans-serif;border:0;border-radius:999px;padding:14px 26px;cursor:pointer;min-height:52px;box-shadow:0 4px 14px #0006}
+#talk{background:#f2a93b;color:#3b2412}
+#talk:hover:not(:disabled){background:#ffbb55}
+#end{background:#fff;color:#8a2a1a;display:none}
+button:disabled{opacity:.6;cursor:wait}
+button:focus-visible{outline:3px solid #fff;outline-offset:3px}
+#ring{position:absolute;inset:-6px;border-radius:999px;border:3px solid #7dff9b;opacity:0;pointer-events:none;transition:opacity .2s}
+.listening #ring{opacity:.9}
+#ia{color:#e9f3d8;font-size:.78rem;text-align:center;max-width:560px;line-height:1.3;opacity:.95}
+#ia b{background:#fff3;border-radius:6px;padding:1px 6px}
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script>
+</head>
+<body>
+<canvas id="c" aria-label="Don Algarrobo, un algarrobo centenario animado en 3D"></canvas>
+<header>
+  <h1>Don Algarrobo — El abuelo del monte</h1>
+  <p>«¡Mis raíces guardan historias y mis ramas siempre tienen algo para contar!»</p>
+</header>
+<div id="panel">
+  <div id="cap" aria-live="polite"></div>
+  <div id="status">Tocá el botón y charlá con él en voz alta</div>
+  <div class="btns" id="btns">
+    <span id="ring"></span>
+    <button id="talk">🎙️ Hablar con Don Algarrobo</button>
+    <button id="end">Finalizar conversación</button>
+  </div>
+  <div id="ia"><b>IA</b> Don Algarrobo es un personaje ficticio que funciona con inteligencia artificial. Tu voz se procesa con ElevenLabs para poder conversar.</div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+
+/* ====== CONFIGURACIÓN ====== */
+const AGENT_ID = 'agent_2701m5hrpabffjmvxtpfft9ywr8x'; // ID público del agente (no es una clave secreta)
+
+/* ====== ESCENA ====== */
+const cv = document.getElementById('c');
+const R = new THREE.WebGLRenderer({canvas: cv, antialias: true, alpha: true});
+R.setPixelRatio(Math.min(devicePixelRatio, 2));
+R.shadowMap.enabled = true;
+const S = new THREE.Scene();
+S.fog = new THREE.Fog(0xcfe6ee, 20, 55);
+const cam = new THREE.PerspectiveCamera(40, 1, .1, 100);
+S.add(new THREE.HemisphereLight(0xbfe3ff, 0x7a6a30, 1.2));
+const sun = new THREE.DirectionalLight(0xffe9b8, 2.4);
+sun.position.set(6, 10, 8); sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+Object.assign(sun.shadow.camera, {left: -10, right: 10, top: 12, bottom: -4});
+S.add(sun);
+
+const M = (c, r = .85) => new THREE.MeshStandardMaterial({color: c, roughness: r});
+const bark = M(0x7b4b2a, .95), skin = M(0xcf965a, .8), skinD = M(0xb97d45, .8);
+const leaves = [0x4f8a2b, 0x6aa332, 0x3f7a2a, 0x86b83a].map(c => M(c, .8));
+const gray = M(0xd2cbbb, 1);
+const sph = new THREE.SphereGeometry(1, 24, 16);
+const add = (p, g, m, x = 0, y = 0, z = 0, sx = 1, sy = 1, sz = 1) => {
+  const o = new THREE.Mesh(g, m); o.position.set(x, y, z); o.scale.set(sx, sy, sz);
+  o.castShadow = true; p.add(o); return o;
+};
+let seed = 7; const rnd = () => (seed = seed * 16807 % 2147483647) / 2147483647;
+
+// Suelo, pasto y árboles lejanos
+const ground = add(S, new THREE.CircleGeometry(60, 48), M(0x9aa84f, 1));
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; ground.castShadow = false;
+const tuft = new THREE.ConeGeometry(.08, .6, 4);
+const grass = new THREE.InstancedMesh(tuft, M(0x6f9a35), 260), mx = new THREE.Matrix4();
+for (let i = 0; i < 260; i++) {
+  const a = rnd() * 6.28, d = 2 + rnd() * 14;
+  mx.makeTranslation(Math.cos(a) * d, .25, Math.sin(a) * d * .8 + 1); grass.setMatrixAt(i, mx);
+}
+S.add(grass);
+for (let i = 0; i < 12; i++) {
+  const g = new THREE.Group(), x = -26 + i * 4.7 + rnd() * 2, z = -14 - rnd() * 10, h = 3 + rnd() * 2;
+  add(g, new THREE.CylinderGeometry(.2, .3, h, 6), bark, 0, h / 2);
+  add(g, sph, leaves[i % 4], 0, h + .5, 0, 1.8, 1.1, 1.8);
+  g.position.set(x, 0, z); S.add(g);
+}
+
+/* ====== DON ALGARROBO ====== */
+const tree = new THREE.Group(); S.add(tree);
+
+// Tronco con corteza rugosa y base ensanchada
+const tg = new THREE.CylinderGeometry(1, 1.8, 4.8, 48, 30);
+const ps = tg.attributes.position;
+for (let i = 0; i < ps.count; i++) {
+  const x = ps.getX(i), y = ps.getY(i), z = ps.getZ(i), a = Math.atan2(z, x);
+  const k = 1 + .06 * Math.sin(a * 7 + y * 1.4) + .035 * Math.sin(a * 15 - y * 2.3) + .025 * Math.sin(y * 3 + a * 3);
+  const fl = 1 + .35 * Math.pow(Math.max(0, (-1.2 - y) / 1.2), 2);
+  ps.setXYZ(i, x * k * fl, y, z * k * fl);
+}
+tg.computeVertexNormals();
+const trunk = add(tree, tg, bark, 0, 2.4, 0);
+trunk.receiveShadow = true;
+
+// Rostro
+const face = new THREE.Group(); face.position.set(0, 3.3, 0); tree.add(face);
+add(face, sph, skin, 0, 0, 1.1, .88, 1.05, .5);               // placa del rostro
+add(face, sph, skinD, 0, -.02, 1.6, .17, .22, .17);           // nariz
+for (const s of [-1, 1]) add(face, sph, M(0xe0896a, .9), s * .52, -.2, 1.42, .17, .12, .06); // mejillas
+const eyes = [], irises = [];
+for (const s of [-1, 1]) {
+  const e = new THREE.Group(); e.position.set(s * .34, .25, 1.5); face.add(e);
+  add(e, sph, M(0xffffff, .3), 0, 0, 0, .21, .21, .15);
+  const ir = new THREE.Group(); e.add(ir);
+  add(ir, sph, M(0x5a3412, .4), 0, 0, .12, .12, .12, .05);
+  add(ir, sph, M(0x050505, .3), 0, 0, .16, .06, .06, .03);
+  add(ir, sph, M(0xffffff, .1), .035, .04, .19, .02, .02, .01);
+  eyes.push(e); irises.push(ir);
+}
+const cap = new THREE.CapsuleGeometry(.04, .3, 4, 8);
+const brows = [-1, 1].map(s => {
+  const b = new THREE.Group(); b.position.set(s * .36, .56, 1.5); face.add(b);
+  const m = add(b, cap, gray, 0, 0, 0, 1, 1, 1.4); m.rotation.z = Math.PI / 2; return b;
+});
+// Bigote y barba
+for (const s of [-1, 1]) add(face, sph, gray, s * .13, -.2, 1.55, .15, .06, .07);
+[[0, -.82, 1.4, .3, .22], [-.2, -.72, 1.4, .17, .17], [.2, -.72, 1.4, .17, .17], [0, -1.05, 1.3, .14, .2]]
+  .forEach(([x, y, z, a, b]) => add(face, sph, gray, x, y, z, a, b, .1));
+// Boca (se mueve con la voz)
+const mouth = new THREE.Group(); mouth.position.set(0, -.4, 1.5); face.add(mouth);
+const inner = add(mouth, new THREE.SphereGeometry(1, 20, 10, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2),
+  new THREE.MeshStandardMaterial({color: 0x3a0f10, side: THREE.DoubleSide}), 0, .1, 0, .3, .05, .12);
+const teeth = add(mouth, new THREE.BoxGeometry(.5, .07, .05), M(0xffffff, .4), 0, .07, .08);
+const lip = add(mouth, new THREE.TorusGeometry(.32, .035, 8, 24, Math.PI), M(0x8a4a2a), 0, .14, .08);
+lip.rotation.z = Math.PI;
+
+// Ramas-brazos con manos
+const arms = [-1, 1].map(s => {
+  const p = new THREE.Group(); p.position.set(s * 1.15, 3.6, .35); tree.add(p);
+  const c = new THREE.CatmullRomCurve3([[0, 0, 0], [.7, -.1, .3], [1.4, .35, .6], [2, .9, .8]]
+    .map(a => new THREE.Vector3(a[0] * s, a[1], a[2])));
+  add(p, new THREE.TubeGeometry(c, 16, .2, 10), bark);
+  const h = new THREE.Group(); h.position.copy(c.getPoint(1)); p.add(h);
+  add(h, sph, skinD, 0, 0, 0, .27, .27, .2);
+  const fg = new THREE.CapsuleGeometry(.065, .26, 4, 8);
+  for (let k = 0; k < 3; k++) { const f = add(h, fg, skinD, (k - 1) * .14, .3, 0); f.rotation.z = -(k - 1) * .28; }
+  const th = add(h, fg, skinD, -s * .27, .1, 0); th.rotation.z = s * .9;
+  return p;
+});
+
+// Copa, ramas altas y vainas
+const canopy = new THREE.Group(); tree.add(canopy);
+for (const [x, z] of [[-2, .3], [2.1, .2], [0, -1.2]]) {
+  const c = new THREE.CatmullRomCurve3([new THREE.Vector3(x * .1, 4.5, 0), new THREE.Vector3(x * .6, 5.8, z * .5), new THREE.Vector3(x, 6.8, z)]);
+  add(canopy, new THREE.TubeGeometry(c, 12, .32, 8), bark);
+}
+const pod = new THREE.CapsuleGeometry(.07, .4, 4, 8), podM = M(0xa6763a, .8);
+for (let i = 0; i < 52; i++) {
+  const a = rnd() * 6.28, d = Math.sqrt(rnd());
+  const x = Math.cos(a) * d * 4.8, z = Math.sin(a) * d * 3.8, y = 7.2 + Math.sqrt(1 - d * d) * 1.8 + (rnd() - .5);
+  const sc = 1.1 + rnd() * .8;
+  add(canopy, sph, leaves[i % 4], x, y, z, sc, sc * .65, sc);
+  if (i % 2 === 0 && y < 8.6) add(canopy, pod, podM, x + (rnd() - .5), y - sc * .6 - .2, z + sc * .5);
+}
+
+// Raíces (sus pies)
+for (let i = 0; i < 7; i++) {
+  const a = -.4 + i / 6 * (Math.PI + .8), cx = Math.cos(a), cz = Math.sin(a) * .9 + .2;
+  const c = new THREE.CatmullRomCurve3([new THREE.Vector3(cx * .8, 1.1, cz * .8), new THREE.Vector3(cx * 1.9, .35, cz * 1.9), new THREE.Vector3(cx * 3, .1, cz * 3)]);
+  add(tree, new THREE.TubeGeometry(c, 14, .28, 8), bark);
+  add(tree, sph, bark, cx * 3, .1, cz * 3, .28, .22, .28);
+}
+
+/* ====== ANIMACIÓN ====== */
+let state = 'idle', level = 0, worry = 0, laugh = 0, worryT = 0, laughT = 0, blink = 0, nextBlink = 2, conv = null;
+const look = {x: 0, y: 0};
+addEventListener('pointermove', e => { look.x = e.clientX / innerWidth - .5; look.y = e.clientY / innerHeight - .5; });
+const lerp = (a, b, k) => a + (b - a) * k;
+const ring = document.getElementById('ring');
+
+function resize() {
+  const w = innerWidth, h = innerHeight, a = w / h;
+  R.setSize(w, h, false); cam.aspect = a;
+  const d = Math.min(26, Math.max(15, 9.5 / (.364 * a)));
+  cam.position.set(0, 4.6, d); cam.lookAt(0, 4.1, 0); cam.updateProjectionMatrix();
+}
+addEventListener('resize', resize); resize();
+
+let last = performance.now();
+R.setAnimationLoop(now => {
+  const t = now / 1000, dt = Math.min(.05, (now - last) / 1000); last = now;
+  const speaking = state === 'speaking', listening = state === 'listening';
+
+  // Volumen de la voz -> boca
+  let target = 0;
+  if (conv && speaking) { try { target = Math.min(1, conv.getOutputVolume() * 2.4); } catch (e) {} }
+  level = lerp(level, target, .4);
+  worryT = Math.max(0, worryT - dt); laughT = Math.max(0, laughT - dt);
+  worry = lerp(worry, worryT > 0 ? 1 : 0, .06);
+  laugh = lerp(laugh, laughT > 0 ? 1 : 0, .1);
+
+  // Boca y sonrisa
+  inner.scale.y = .04 + level * .3 + laugh * .1;
+  teeth.visible = inner.scale.y > .09;
+  teeth.position.y = .1 - .01;
+  lip.scale.y = 1 - worry * 2.2 + laugh * .35;
+  lip.position.y = .14 + worry * .12;
+  mouth.scale.x = 1 + laugh * .15 - level * .12;
+
+  // Cejas
+  const up = listening ? .06 : 0;
+  brows.forEach((b, i) => {
+    const s = i === 0 ? 1 : -1;
+    b.rotation.z = s * (worry * .4 - laugh * .08 + Math.sin(t * 2.5) * .02 * (speaking ? 1 : 0));
+    b.position.y = lerp(b.position.y, .56 + up + level * .06 + worry * .03, .2);
+  });
+
+  // Parpadeo y mirada
+  nextBlink -= dt;
+  if (nextBlink < 0) { blink = 1; nextBlink = 2 + Math.random() * 3.5; }
+  blink = Math.max(0, blink - dt * 7);
+  const lid = Math.max(.08, 1 - Math.sin(blink * Math.PI) * .95) * (1 - laugh * .3) * (listening ? 1.1 : 1);
+  eyes.forEach(e => e.scale.y = lid);
+  irises.forEach(ir => { ir.position.x = lerp(ir.position.x, look.x * .12, .1); ir.position.y = lerp(ir.position.y, -look.y * .08, .1); });
+
+  // Cuerpo: respiración, balanceo, inclinación al escuchar, gestos al hablar
+  tree.scale.y = 1 + Math.sin(t * 1.2) * .005;
+  tree.rotation.y = Math.sin(t * .3) * .05;
+  tree.rotation.z = lerp(tree.rotation.z, (listening ? .07 : 0) + Math.sin(t * .6) * .01 + (laugh ? Math.sin(t * 14) * .01 : 0), .06);
+  canopy.rotation.z = Math.sin(t * .55) * .015; canopy.rotation.x = Math.sin(t * .4) * .01;
+  arms.forEach((p, i) => {
+    const s = i === 0 ? -1 : 1, g = speaking ? .12 + level * .5 : .03;
+    p.rotation.z = lerp(p.rotation.z, s * (Math.sin(t * 2.1 + i * 1.7) * g + (worry ? -.25 : .05) + (listening ? -.1 : 0)), .1);
+    p.rotation.x = lerp(p.rotation.x, Math.sin(t * 1.7 + i) * g * .6, .1);
+  });
+
+  // Anillo del micrófono
+  if (listening && conv) { try { ring.style.transform = 'scale(' + (1 + conv.getInputVolume() * .25) + ')'; } catch (e) {} }
+  R.render(S, cam);
+});
+
+/* ====== INTERFAZ Y CONVERSACIÓN ====== */
+const $ = id => document.getElementById(id);
+const talk = $('talk'), end = $('end'), status = $('status'), capEl = $('cap'), btns = $('btns');
+const say = (s, c = '') => { status.textContent = s; };
+const showIdle = () => {
+  state = 'idle'; conv = null; talk.style.display = ''; talk.disabled = false; end.style.display = 'none';
+  btns.classList.remove('listening'); ring.style.transform = '';
+  status.textContent = 'Tocá el botón y charlá con él en voz alta';
+};
+
+async function start() {
+  talk.disabled = true; status.textContent = 'Conectando con el monte…'; capEl.textContent = '';
+  try {
+    const st = await navigator.mediaDevices.getUserMedia({audio: true});
+    st.getTracks().forEach(t => t.stop());
+  } catch (e) {
+    status.textContent = 'Necesito permiso para usar el micrófono. Activalo en tu navegador y probá de nuevo.';
+    talk.disabled = false; return;
+  }
+  try {
+    const {Conversation} = await import('https://cdn.jsdelivr.net/npm/@elevenlabs/client/+esm');
+    const opts = {
+      agentId: AGENT_ID,
+      onConnect: () => { try{parent.postMessage({cc:'connected',who:'algarrobo'},'*')}catch(e){} talk.style.display = 'none'; end.style.display = ''; state = 'listening'; btns.classList.add('listening'); },
+      onDisconnect: showIdle,
+      onError: e => { console.error(e); status.textContent = 'Ups, algo falló en la conexión. Probá de nuevo.'; },
+      onModeChange: ({mode}) => {
+        state = mode === 'speaking' ? 'speaking' : 'listening';
+        btns.classList.toggle('listening', state === 'listening');
+        status.textContent = state === 'speaking' ? 'Don Algarrobo está hablando…' : 'Don Algarrobo te está escuchando…';
+      },
+      onMessage: ({message, source}) => {
+        capEl.textContent = message;
+        if (source === 'ai') {
+          if (/deforest|tala|incendio|contamin|sequ[ií]a|extinci|basura|calentamiento|cambio clim/i.test(message)) worryT = 6;
+          if (/ja,? ?ja|chiste/i.test(message)) laughT = 3;
+        }
+      }
+    };
+    try { conv = await Conversation.startSession({...opts, connectionType: 'webrtc'}); }
+    catch (e) { console.warn('WebRTC falló, probando WebSocket', e); conv = await Conversation.startSession({...opts, connectionType: 'websocket'}); }
+  } catch (e) {
+    console.error(e); status.textContent = 'No pude conectarme con Don Algarrobo. Revisá tu internet y probá de nuevo.';
+    talk.disabled = false;
+  }
+}
+talk.onclick = start;
+window.__cc={start:()=>{if(!conv)start()},stop:()=>end.onclick()};
+addEventListener('message',e=>{if(e.data==='cc:stop'&&conv)end.onclick()});
+end.onclick = async () => { end.disabled = true; try { await conv?.endSession(); } catch (e) {} end.disabled = false; showIdle(); capEl.textContent = ''; };
+</script>
+</body>
+</html>
